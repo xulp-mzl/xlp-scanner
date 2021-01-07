@@ -17,8 +17,10 @@ import org.xlp.scanner.annotation.PermissionItem;
 import org.xlp.scanner.item.exception.FunctionItemException;
 import org.xlp.scanner.item.util.MethodUtils;
 import org.xlp.scanner.pkg.ClassPathPkgScanner;
+import org.xlp.utils.XLPArrayUtil;
 import org.xlp.utils.XLPStringUtil;
 import org.xlp.utils.XLPSystemParamUtil;
+import org.xlp.utils.collection.XLPCollectionUtil;
 
 /**
  * <p>
@@ -40,6 +42,11 @@ public class FunctionItemProcessor {
 	 * 类加载器
 	 */
 	private ClassLoader classLoader;
+	
+	/**
+	 * 存储要处理包的名称
+	 */
+	private Set<String> processPkgs = new HashSet<String>();
 
 	/**
 	 * 构造器
@@ -87,44 +94,46 @@ public class FunctionItemProcessor {
 	/**
 	 * 根据包名获取所有的功能条目
 	 * 
-	 * @param basePackage
-	 * @return 包名下所有的功能条目
+	 * @return 返回要解析包名下所有的功能条目
 	 * @throws FunctionItemException
 	 *             假如不忽略functionId重复错误，则抛出该异常
 	 */
-	public List<FunctionItem> getFunctionItems(String basePackage) {
-		boolean isDebug = LOGGER.isDebugEnabled();
-		if (isDebug) {
-			LOGGER.debug("开始通过包名【" + basePackage + "】获取功能条目信息。");
-		}
+	public List<FunctionItem> getFunctionItems() {
 		List<FunctionItem> functionItems = new LinkedList<FunctionItem>();
-		boolean isWarn = LOGGER.isWarnEnabled();
-		if (XLPStringUtil.isEmpty(basePackage)) {
+		if (processPkgs.isEmpty()) { 
+			boolean isWarn = LOGGER.isWarnEnabled();
 			if (isWarn) {
-				LOGGER.warn("给定的包名【" + basePackage + "】为空或null。");
+				LOGGER.warn("没有要解析的包名。");
 			}
 			return functionItems;
 		}
-
+		
 		// 获取指定包名下的所有class
 		ClassPathPkgScanner scanner = new ClassPathPkgScanner(classLoader);
-		Set<Class<?>> classes = new HashSet<>(0);
+		Set<Class<?>> classes = new HashSet<Class<?>>();
 
+		boolean isDebug = LOGGER.isDebugEnabled();
 		boolean isError = LOGGER.isErrorEnabled();
-		try {
-			classes = scanner.scannerToClass(basePackage);
-		} catch (IOException e) {
-			if (isError) {
-				LOGGER.error("获取指定包下的class失败，失败原因如下：" + XLPSystemParamUtil.getSystemNewline(), e);
+		//循环处理包名
+		for (String basePackage : processPkgs) {
+			if (isDebug) {
+				LOGGER.debug("开始通过包名【" + basePackage + "】获取功能条目信息。");
+			}
+			try {
+				classes.addAll(scanner.scannerToClass(basePackage));
+			} catch (IOException e) {
+				if (isError) {
+					LOGGER.error("获取指定包下的class失败，失败原因如下：" + XLPSystemParamUtil.getSystemNewline(), e);
+				}
 			}
 		}
+		
 		// 根据@PermissionControl注解过滤出需要的class
 		classes = filterByAnnotation(classes, PermissionControl.class);
 		// 获取@PermissionItem的功能条目
 		processFunctionItems(classes, functionItems);
 		// 建立条目之间的关系
 		functionItems = createFunctionItemLink(functionItems);
-
 		return functionItems;
 	}
 
@@ -224,6 +233,8 @@ public class FunctionItemProcessor {
 	protected void processFunctionItems(Set<Class<?>> classes, List<FunctionItem> functionItems) {
 		PermissionItem permissionItem;
 		FunctionItem functionItem = null;
+		String functionId;
+		boolean isWarn = LOGGER.isWarnEnabled();
 		for (Class<?> cs : classes) {
 			functionItem = null;
 			String className = cs.getSimpleName();
@@ -232,7 +243,15 @@ public class FunctionItemProcessor {
 				functionItem = new FunctionItem();
 				functionItem.setClassName(className);
 				permissionItemFillFunctionItem(permissionItem, functionItem);
-				functionItems.add(functionItem);
+				functionId = functionItem.getFunctionId();
+				if (XLPStringUtil.isEmpty(functionId)) {
+					if (isWarn) {
+						LOGGER.warn(functionItem + "的functionId为空，跳过该功能条目。");
+					}
+					functionItem = null;
+				} else {
+					functionItems.add(functionItem);
+				}
 			}
 			// 处理该类下含PermissionItem注解的方法
 			// 获取该类下的所有公共方法
@@ -249,11 +268,21 @@ public class FunctionItemProcessor {
 					functionItem.setClassName(className);
 					functionItem.setMethodName(method.getName());
 					permissionItemFillFunctionItem(permissionItem, functionItem);
-					functionItems.add(functionItem);
+					
+					functionId = functionItem.getFunctionId();
+					if (XLPStringUtil.isEmpty(functionId)) {
+						if (isWarn) {
+							LOGGER.warn(functionItem + "的functionId为空，跳过该功能条目。");
+						}
+						functionItem = null;
+						continue;
+					}
+					
 					// 假如没有父功能条目, 就设置class对应的功能条目为父功能条目
 					if (functionItem.getParentFunctionItem() == null) {
 						functionItem.setParentFunctionItem(parentFunctionItem);
 					}
+					functionItems.add(functionItem);
 				}
 			}
 		}
@@ -300,13 +329,54 @@ public class FunctionItemProcessor {
 	/**
 	 * 根据包名获取所有的功能条目并转换成json格式字符串
 	 * 
-	 * @param basePackage
-	 *            包名
-	 * @return 包名获取所有的功能条目并转换成json格式字符串
+	 * @return 解析包名获取所有的功能条目并转换成json格式字符串
 	 * @throws FunctionItemException
 	 *             假如不忽略functionId重复错误，则抛出该异常
 	 */
-	public String functionItemsToJson(String basePackage) {
-		return JsonArray.fromCollection(this.getFunctionItems(basePackage)).toString();
+	public String functionItemsToJson() {
+		return JsonArray.fromCollection(this.getFunctionItems()).toString();
+	}
+	
+	/**
+	 * 添加要处理的包名称
+	 * 
+	 * @param basePackage 包名称
+	 * @return 返回本类实例对象
+	 */
+	public FunctionItemProcessor addProcessPackage(String basePackage){
+		if (!XLPStringUtil.isEmpty(basePackage)) {
+			this.processPkgs.add(basePackage.trim());
+		}
+		return this;
+	}
+	
+	/**
+	 * 添加要处理的包名称
+	 * 
+	 * @param basePackages 包名称
+	 * @return 返回本类实例对象
+	 */
+	public FunctionItemProcessor addProcessPackages(String[] basePackages){
+		if (!XLPArrayUtil.isEmpty(basePackages)) {
+			for (String basePackage : basePackages) {
+				addProcessPackage(basePackage);
+			}
+		}
+		return this;
+	}
+	
+	/**
+	 * 添加要处理的包名称
+	 * 
+	 * @param basePackages 包名称
+	 * @return 返回本类实例对象
+	 */
+	public FunctionItemProcessor addProcessPackages(List<String> basePackages){ 
+		if (!XLPCollectionUtil.isEmpty(basePackages)) {
+			for (String basePackage : basePackages) {
+				addProcessPackage(basePackage);
+			}
+		}
+		return this;
 	}
 }
