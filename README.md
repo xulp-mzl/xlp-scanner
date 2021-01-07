@@ -35,5 +35,7 @@ public class Test {
 		}
         
         FunctionItemProcessor functionItemProcessor = new FunctionItemProcessor();
-        System.out.println(functionItemProcessor.functionItemsToJson("org.xlp.test"));
+        functionItemProcessor.addProcessPackage("org.xlp.test.te").addProcessPackage("org.xlp.tt")
+      	  .addProcessPackage("org.xlp");
+        System.out.println(JsonArray.fromCollection(functionItemProcessor.getFunctionItems()).format());
 ```
