@@ -15,7 +15,6 @@ import java.util.jar.JarFile;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.xlp.assertion.AssertUtils;
 import org.xlp.scanner.constants.ScannerPkgConsts;
 import org.xlp.scanner.util.ClassUtils;
 import org.xlp.scanner.util.StringUtils;
@@ -66,13 +65,8 @@ public class ClassPathPkgScanner implements ScannerPkg {
 	@Override
 	public Set<String> scanner(String packageName) throws IOException {
 		Set<String> classSet = new HashSet<String>();
-		if (XLPStringUtil.isEmpty(packageName)) {
-			if (LOGGER.isWarnEnabled()) {
-				LOGGER.warn("packageName 参数为null或空！");
-			}
-			return classSet;
-		}
-		AssertUtils.isNotNull(packageName, "packageName param is null or empty!");
+		packageName = XLPStringUtil.toEmpty(packageName);
+		
 		if (LOGGER.isInfoEnabled()) {
 			LOGGER.info("开始扫描该" + packageName + "下的所有class文件");
 		}
@@ -242,6 +236,10 @@ public class ClassPathPkgScanner implements ScannerPkg {
 				// 如果是java类文件 去掉后面的.class 只留下类名
 				String className = filename.substring(0, filename.length() - ScannerPkgConsts.CLASS_FILE_EXT.length());
 				className = packageName + "." + className;
+				//去掉前缀“.”
+				if (className.startsWith(".")) {
+					className = className.substring(1);
+				}
 				classSet.add(className);
 			}
 		}
