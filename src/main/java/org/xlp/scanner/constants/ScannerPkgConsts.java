@@ -12,6 +12,11 @@ public final class ScannerPkgConsts {
 	public final static String CLASS_FILE_EXT = ".class";
 	
 	/**
+	 * jar文件后缀名
+	 */
+	public final static String JAR_FILE_EXT = ".jar";
+	
+	/**
 	 * 内部类命名标识
 	 */
 	public final static String INNER_CLASS_FLAG = "$";

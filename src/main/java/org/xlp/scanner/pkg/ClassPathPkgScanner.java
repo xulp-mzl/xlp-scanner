@@ -20,6 +20,7 @@ import org.xlp.scanner.util.ClassUtils;
 import org.xlp.scanner.util.StringUtils;
 import org.xlp.scanner.util.URLUtils;
 import org.xlp.utils.XLPStringUtil;
+import org.xlp.utils.XLPSystemParamUtil;
 
 /**
  * <p>
@@ -65,32 +66,57 @@ public class ClassPathPkgScanner implements ScannerPkg {
 	@Override
 	public Set<String> scanner(String packageName) throws IOException {
 		Set<String> classSet = new HashSet<String>();
-		packageName = XLPStringUtil.toEmpty(packageName);
+		packageName = XLPStringUtil.emptyTrim(packageName);
 		
-		if (LOGGER.isInfoEnabled()) {
-			LOGGER.info("开始扫描该" + packageName + "下的所有class文件");
-		}
-		packageName = packageName.trim();
-		String packagePath = StringUtils.dotToSplash(packageName);
-		Enumeration<URL> resourceUrls = (classLoader != null ? classLoader.getResources(packagePath)
-				: ClassLoader.getSystemResources(packagePath));
-		boolean isDebug = LOGGER.isDebugEnabled();
-		while (resourceUrls.hasMoreElements()) {
-			URL packageUrl = (URL) resourceUrls.nextElement();
-			if (isDebug) {
-				LOGGER.debug("开始扫描：" + packageUrl + "中的class文件"); 
+		//假如传过来的包名为空，则扫描类路径下的所有类
+		if (XLPStringUtil.isEmpty(packageName)) { 
+			String classPath = XLPSystemParamUtil.getJavaClassPath();
+			//获取所有的类路径，包括jar文件
+			String[] classPaths = classPath.split(XLPSystemParamUtil.getPathSeparator());
+			File tempFile;
+			for (String cp : classPaths) {
+				tempFile = new File(cp);
+				//判断是否是jar文件
+				if (tempFile.isFile() && cp.endsWith(ScannerPkgConsts.JAR_FILE_EXT)) {
+					classSet.addAll(findByJarFile(new JarFile(tempFile)));
+				} else if (tempFile.isDirectory()) {
+					//获取所有的子文件或文件夹
+					File[] childrenFile = tempFile.listFiles();
+					if (childrenFile != null) {
+						for (File childFile : childrenFile) {
+							// 以文件的方式扫描整个包下的文件 并添加到集合中
+							findClassesInPackageByFile(XLPStringUtil.EMPTY, childFile.getAbsolutePath(), classSet);
+						}
+					}
+				}
 			}
-
-			// 如果是以文件的形式保存在服务器上
-			if (URLUtils.isFileProtocol(packageUrl)) {
-				// file类型的扫描
-				File file = URLUtils.getFile(packageUrl);
-				// 获取包的物理路径
-				String filePath = file.getAbsolutePath();
-				// 以文件的方式扫描整个包下的文件 并添加到集合中
-				findClassesInPackageByFile(packageName, filePath, classSet);
-			} else if (URLUtils.isJarProtocol(packageUrl)) { 
-				findClassesInJarFile(packageName, packageUrl, classSet); 
+		} else {
+			//扫描自定包下的所有类
+			if (LOGGER.isInfoEnabled()) {
+				LOGGER.info("开始扫描该" + packageName + "下的所有class文件");
+			}
+			
+			String packagePath = StringUtils.dotToSplash(packageName);
+			Enumeration<URL> resourceUrls = (classLoader != null ? classLoader.getResources(packagePath)
+					: ClassLoader.getSystemResources(packagePath));
+			boolean isDebug = LOGGER.isDebugEnabled();
+			while (resourceUrls.hasMoreElements()) {
+				URL packageUrl = (URL) resourceUrls.nextElement();
+				if (isDebug) {
+					LOGGER.debug("开始扫描：" + packageUrl + "中的class文件"); 
+				}
+	
+				// 如果是以文件的形式保存在服务器上
+				if (URLUtils.isFileProtocol(packageUrl)) {
+					// file类型的扫描
+					File file = URLUtils.getFile(packageUrl);
+					// 获取包的物理路径
+					String filePath = file.getAbsolutePath();
+					// 以文件的方式扫描整个包下的文件 并添加到集合中
+					findClassesInPackageByFile(packageName, filePath, classSet);
+				} else if (URLUtils.isJarProtocol(packageUrl)) { 
+					findClassesInJarFile(packageName, packageUrl, classSet); 
+				}
 			}
 		}
 		return classSet;
@@ -113,7 +139,6 @@ public class ClassPathPkgScanner implements ScannerPkg {
 		URLConnection con = packageUrl.openConnection();
 		JarFile jarFile = null; 
 		String jarFileUrl = ""; 
-		String packageBasePath = StringUtils.dotToSplash(packageName);
 		boolean closeJarFile = true;
 
 		if (con instanceof JarURLConnection) {
@@ -152,28 +177,57 @@ public class ClassPathPkgScanner implements ScannerPkg {
 			if (LOGGER.isDebugEnabled()) {
 				LOGGER.debug("在jar文件中查找匹配的资源 [" + jarFileUrl + "]");
 			}
-			if (!"".equals(packageBasePath) && !packageBasePath.endsWith("/")) {
-				// 根条目路径必须以斜杠结束，以允许正确的匹配。匹配sunjre在这里不返回斜杠，但是beajrockit返回。
-				packageBasePath = packageBasePath + "/";
-			}
-			for (Enumeration<JarEntry> entries = jarFile.entries(); entries.hasMoreElements();) {
-				JarEntry entry = entries.nextElement();
-				String entryPath = entry.getName();
-				if (entryPath.startsWith(packageBasePath) && entryPath.endsWith(ScannerPkgConsts.CLASS_FILE_EXT)) { 
-					int index = entryPath.indexOf(ScannerPkgConsts.CLASS_FILE_EXT);
-					String relativePath = entryPath.substring(packageBasePath.length(), index);
-					//排除内部类
-					if (relativePath.contains(ScannerPkgConsts.INNER_CLASS_FLAG)) {
-						continue;
-					}
-					classSet.add(packageName + "." + StringUtils.splashToDot(relativePath));
-				}
-			}
+			
+			classSet.addAll(findByJarFile(packageName, jarFile));
 		} finally {
 			if (closeJarFile && jarFile != null) {
 				jarFile.close();
 			}
 		}
+	}
+
+	/**
+	 * 获取指定jar文件中所有class名称（包名+类名称）格式为xx.xx.yy
+	 * 
+	 * @param jarFile jar文件
+	 * @return class名称集合， 假如参数为null，返回大小为0的集合
+	 */
+	public Set<String> findByJarFile(JarFile jarFile) {
+		return findByJarFile(XLPStringUtil.EMPTY, jarFile);
+	}
+	
+	/**
+	 * 获取指定jar文件中所有class名称（包名+类名称） xx.xx.yy
+	 * 
+	 * @param packageName 包名前缀xx.xx
+	 * @param jarFile jar文件
+	 * @return class名称集合， 假如参数为null，返回大小为0的集合
+	 */
+	public Set<String> findByJarFile(String packageName, JarFile jarFile) {
+		Set<String> classSet = new HashSet<>();
+		if (jarFile == null) {
+			return classSet;
+		}
+		packageName = XLPStringUtil.emptyTrim(packageName);
+		String packageBasePath = StringUtils.dotToSplash(packageName);
+		if (!"".equals(packageBasePath) && !packageBasePath.endsWith("/")) {
+			// 根条目路径必须以斜杠结束，以允许正确的匹配。匹配sunjre在这里不返回斜杠，但是beajrockit返回。
+			packageBasePath = packageBasePath + "/";
+		}
+		for (Enumeration<JarEntry> entries = jarFile.entries(); entries.hasMoreElements();) {
+			JarEntry entry = entries.nextElement();
+			String entryPath = entry.getName();
+			if (entryPath.startsWith(packageBasePath) && entryPath.endsWith(ScannerPkgConsts.CLASS_FILE_EXT)) { 
+				int index = entryPath.indexOf(ScannerPkgConsts.CLASS_FILE_EXT);
+				String relativePath = entryPath.substring(0, index);
+				//排除内部类
+				if (relativePath.contains(ScannerPkgConsts.INNER_CLASS_FLAG)) {
+					continue;
+				}
+				classSet.add(StringUtils.splashToDot(relativePath));
+			}
+		}
+		return classSet;
 	}
 
 	/**
