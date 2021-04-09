@@ -279,6 +279,11 @@ public class ClassPathPkgScanner implements ScannerPkg {
 						&& !name.contains(ScannerPkgConsts.INNER_CLASS_FLAG)));
 			}
 		});
+		
+		if (dirfiles == null) {
+			return;
+		}
+		
 		// 循环所有文件
 		for (File file : dirfiles) {
 			String name = file.getName();
