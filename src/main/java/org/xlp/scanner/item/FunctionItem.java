@@ -3,8 +3,9 @@ package org.xlp.scanner.item;
 import java.util.LinkedList;
 import java.util.List;
 
-import org.xlp.json.annotation.Bean;
-import org.xlp.json.annotation.FieldName;
+import org.xlp.javabean.annotation.Bean;
+import org.xlp.javabean.annotation.FieldName;
+
 
 /**
  * <p>
