@@ -27,12 +27,14 @@
 			<groupId>org.xlp</groupId>
 			<artifactId>xlp-core</artifactId>
 			<version>${xlp.jar.versionNo}</version>
+			<optional>true</optional>
 		</dependency>
 		<!-- https://mvnrepository.com/artifact/org.slf4j/slf4j-api -->
 		<dependency>
 			<groupId>org.slf4j</groupId>
 			<artifactId>slf4j-api</artifactId>
 			<version>${slf4j-api.version}</version>
+			<optional>true</optional>
 		</dependency>
 
 		<!-- Spring web依赖 -->
